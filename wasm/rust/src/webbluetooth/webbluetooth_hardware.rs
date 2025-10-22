@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use buttplug::{
-  core::{
-    errors::ButtplugDeviceError,
-    message::Endpoint,
-  },
-  server::device::{
-  configuration::{BluetoothLESpecifier, ProtocolCommunicationSpecifier},
+use buttplug_core::{
+    errors::ButtplugDeviceError
+};
+use buttplug_server_device_config::{ProtocolCommunicationSpecifier, Endpoint};
+
+use buttplug_server_device_config::{BluetoothLESpecifier};
+
+use buttplug_server::device::{
   hardware::{
       Hardware,
       HardwareConnector,
@@ -18,9 +19,9 @@ use buttplug::{
       HardwareUnsubscribeCmd,
       HardwareWriteCmd,
   },
-},
-  util::future::{ButtplugFuture, ButtplugFutureStateShared},
 };
+
+use buttplug_core::util::future::{ButtplugFuture, ButtplugFutureStateShared};
 use futures::future::{self, BoxFuture};
 use js_sys::{DataView, Uint8Array};
 use std::{
@@ -56,6 +57,7 @@ unsafe impl Sync for BluetoothDeviceWrapper {
 
 
 pub struct WebBluetoothHardwareConnector {
+  name: String,
   device: Option<BluetoothDeviceWrapper>,
 }
 
@@ -63,7 +65,9 @@ impl WebBluetoothHardwareConnector {
   pub fn new(
     device: BluetoothDevice,
   ) -> Self {
+    info!("WebBluetoothHardwareConnector created for {:?}", device.name());
     Self {
+      name: device.name().unwrap(),
       device: Some(BluetoothDeviceWrapper {
         device,
       })
@@ -83,10 +87,10 @@ impl Debug for WebBluetoothHardwareConnector {
 impl HardwareConnector for WebBluetoothHardwareConnector {
   fn specifier(&self) -> ProtocolCommunicationSpecifier {
     ProtocolCommunicationSpecifier::BluetoothLE(BluetoothLESpecifier::new_from_device(
-      &self.device.as_ref().unwrap().device.name().unwrap(),
+      &self.name,
       &HashMap::new(),
       &[]
-    ))    
+    ))
   }
 
   async fn connect(&mut self) -> Result<Box<dyn HardwareSpecializer>, ButtplugDeviceError> {
@@ -155,7 +159,10 @@ impl HardwareSpecializer for WebBluetoothHardwareSpecializer {
           receiver,
           command_sender,
         ));
-        Ok(Hardware::new(&name, &address, &[], device_impl))
+        Ok(Hardware::new(&name, &address, &[],
+                         // XXX message_gap and requires_keepalive new, unsure if we want them here.
+                         &None, false,
+                         device_impl))
       }
       WebBluetoothEvent::Disconnected => Err(
         ButtplugDeviceError::DeviceCommunicationError(
@@ -266,8 +273,9 @@ async fn run_webbluetooth_loop(
       WebBluetoothDeviceCommand::Write(write_cmd, waker) => {
         debug!("Writing to endpoint {:?}", write_cmd.endpoint());
         let chr = char_map.get(&write_cmd.endpoint()).unwrap().clone();
-        spawn_local(async move {
-          JsFuture::from(chr.write_value_with_u8_array(&mut write_cmd.data().clone()))
+          spawn_local(async move {
+            let u8array = Uint8Array::from(write_cmd.data().as_slice());
+            JsFuture::from(chr.write_value_with_u8_array(&u8array).unwrap())
             .await
             .unwrap();
           waker.set_reply(Ok(()));

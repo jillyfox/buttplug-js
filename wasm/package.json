@@ -4,12 +4,19 @@
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "build:web": "vite build",
-    "build:wasm": "cd rust; wasm-pack build"
+    "build:wasm": "cd rust; wasm-pack build",
+    "build": "yarn build:wasm && yarn build:main && yarn build:web"
   },
+  "main": "./dist/buttplug-wasm.mjs",
   "type": "module",
   "dependencies": {
-    "buttplug": "^3.2.1",
-    "eventemitter3": "^5.0.1"
+    "//": {
+      "buttplug": "^3.2.1"
+    },
+    "buttplug": "../js",
+    "env": "^0.0.2",
+    "eventemitter3": "^5.0.1",
+    "rust": "./rust"
   },
   "devDependencies": {
     "rollup": "^4.12.0",

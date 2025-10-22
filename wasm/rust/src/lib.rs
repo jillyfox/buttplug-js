@@ -5,13 +5,16 @@ extern crate futures;
 
 
 mod webbluetooth;
+use buttplug_server_device_config::{load_protocol_configs, DeviceConfigurationManagerBuilder};
 use js_sys;
 use tokio_stream::StreamExt;
 use crate::webbluetooth::*;
-use buttplug::{
-  core::message::{ButtplugCurrentSpecServerMessage, serializer::vec_to_protocol_json},
-  server::ButtplugServer,
-  util::async_manager, server::ButtplugServerBuilder, core::message::{BUTTPLUG_CURRENT_MESSAGE_SPEC_VERSION, serializer::{ButtplugSerializedMessage, ButtplugMessageSerializer, ButtplugServerJSONSerializer}}
+use buttplug_core::message::{serializer::json_serializer::vec_to_protocol_json, ButtplugMessageSpecVersion, ButtplugServerMessageV4, BUTTPLUG_CURRENT_API_MAJOR_VERSION};
+use buttplug_server::{device::ServerDeviceManagerBuilder, message::{serializer::ButtplugServerJSONSerializer, ButtplugServerMessageV3, ButtplugServerMessageVariant}, ButtplugServer};
+use buttplug_core::util::async_manager;
+use buttplug_server::ButtplugServerBuilder;
+use buttplug_core::{
+    message::{serializer::{ButtplugSerializedMessage, ButtplugMessageSerializer}}
 };
 
 type FFICallback = js_sys::Function;
@@ -35,7 +38,7 @@ use js_sys::Uint8Array;
 pub type ButtplugWASMServer = Arc<ButtplugServer>;
 
 pub fn send_server_message(
-  message: &ButtplugCurrentSpecServerMessage,
+  message: &ButtplugServerMessageV3,
   callback: &FFICallback,
 ) {
   let msg_array = [message.clone()];
@@ -54,18 +57,29 @@ pub fn buttplug_create_embedded_wasm_server(
   callback: &FFICallback,
 ) -> *mut ButtplugWASMServer {
   console_error_panic_hook::set_once();
-  let mut builder = ButtplugServerBuilder::default();
-  builder.comm_manager(WebBluetoothCommunicationManagerBuilder::default());
+  // XXX I don't think this is right.
+  //let dcm = DeviceConfigurationManagerBuilder::default()
+  //  .finish()
+  //  .unwrap();
+  let config_manager = load_protocol_configs(&None, &None, false)
+    .expect("If this fails, the whole library goes with it.")
+    .finish()
+    .expect("If this fails, the whole library goes with it.");
+  let mut dev_builder = ServerDeviceManagerBuilder::new(config_manager);
+  dev_builder.comm_manager(WebBluetoothCommunicationManagerBuilder::default());
+  let builder = ButtplugServerBuilder::new(dev_builder.finish().unwrap());
   let server = Arc::new(builder.finish().unwrap());
   let event_stream = server.event_stream();
   let callback = callback.clone();
   async_manager::spawn(async move {
     pin_mut!(event_stream);
     while let Some(message) = event_stream.next().await {
-      send_server_message(&ButtplugCurrentSpecServerMessage::try_from(message).unwrap(), &callback);
+      // TryFrom removed on variant here, not sure what expected pattern is
+      let ButtplugServerMessageVariant::V3(msg) = message else { unreachable!() };
+      send_server_message(&msg, &callback);
     }
   });
-  
+
   Box::into_raw(Box::new(server))
 }
 
@@ -93,11 +107,13 @@ pub fn buttplug_client_send_json_message(
   };
   let callback = callback.clone();
   let serializer = ButtplugServerJSONSerializer::default();
-  serializer.force_message_version(&BUTTPLUG_CURRENT_MESSAGE_SPEC_VERSION);
+  //serializer.force_message_version(&BUTTPLUG_CURRENT_API_MAJOR_VERSION);
+  serializer.force_message_version(&ButtplugMessageSpecVersion::Version3);
   let input_msg = serializer.deserialize(&ButtplugSerializedMessage::Text(std::str::from_utf8(buf).unwrap().to_owned())).unwrap();
   async_manager::spawn(async move {
     let response = server.parse_message(input_msg[0].clone()).await.unwrap();
-    send_server_message(&response.try_into().unwrap(), &callback);
+    let ButtplugServerMessageVariant::V3(msg) = response else { unreachable!("Wrong message version?") };
+    send_server_message(&msg, &callback);
   });
 }
 

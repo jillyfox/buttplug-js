@@ -16,7 +16,7 @@ export class ButtplugWasmClientConnector extends EventEmitter implements IButtpl
 
   private static maybeLoadWasm = async() => {
     if (ButtplugWasmClientConnector.wasmInstance == undefined) {
-      ButtplugWasmClientConnector.wasmInstance = await import('@/../rust/pkg/buttplug_wasm.js');
+      ButtplugWasmClientConnector.wasmInstance = await import('../rust/pkg/buttplug_wasm.js');
     }    
   }
   

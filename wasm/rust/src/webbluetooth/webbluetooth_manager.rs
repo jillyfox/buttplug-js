@@ -1,16 +1,15 @@
 use super::webbluetooth_hardware::WebBluetoothHardwareConnector;
 
-use buttplug::{
-  core::ButtplugResultFuture,
-  server::device::{
-    configuration::ProtocolCommunicationSpecifier,
+use buttplug_core::ButtplugResultFuture;
+use buttplug_server_device_config::ProtocolCommunicationSpecifier;
+use buttplug_server_device_config::load_protocol_configs;
+use buttplug_server::device::{
     hardware::communication::{
       HardwareCommunicationManager, HardwareCommunicationManagerBuilder,
       HardwareCommunicationManagerEvent,
     },
-  },
-  util::device_configuration::create_test_dcm,
-};
+  };
+
 use futures::future;
 use js_sys::Array;
 use tokio::sync::mpsc::Sender;
@@ -65,11 +64,16 @@ impl HardwareCommunicationManager for WebBluetoothCommunicationManager {
       // HACK: As of buttplug v5, we can't just create a HardwareCommunicationManager anymore. This is
       // using a test method to create a filled out DCM, which will work for now because there's no
       // way for anyone to add device configurations through FFI yet anyways.
-      let config_manager = create_test_dcm(false);
+      let config_manager = load_protocol_configs(&None, &None, false)
+        .expect("If this fails, the whole library goes with it.")
+        .finish()
+        .expect("If this fails, the whole library goes with it.");
       let mut options = web_sys::RequestDeviceOptions::new();
       let filters = Array::new();
       let optional_services = Array::new();
-      for vals in config_manager.protocol_device_configurations().iter() {
+      // XXX is iterating base_communication_specifiers here proper?
+      //     previously protocol_device_configurations
+      for vals in config_manager.base_communication_specifiers().iter() {
         for config in vals.1 {
           if let ProtocolCommunicationSpecifier::BluetoothLE(btle) = &config {
             for name in btle.names() {
